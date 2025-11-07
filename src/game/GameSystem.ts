@@ -35,24 +35,28 @@ export class GameSystem {
     currentX: number;
     currentY: number;
     radius: number;
+    touchId: number | null;
   } = {
     active: false,
     startX: 0,
     startY: 0,
     currentX: 0,
     currentY: 0,
-    radius: 80
+    radius: 80,
+    touchId: null
   };
   private attackButton: {
     x: number;
     y: number;
     radius: number;
     pressed: boolean;
+    touchId: number | null;
   } = {
     x: 0,
     y: 0,
     radius: 60,
-    pressed: false
+    pressed: false,
+    touchId: null
   };
   private touchIds: Set<number> = new Set();
 
@@ -212,6 +216,7 @@ export class GameSystem {
       this.attackButton.x = attackButtonArea.x + attackButtonArea.width / 2;
       this.attackButton.y = attackButtonArea.y + attackButtonArea.height / 2;
       this.attackButton.pressed = true;
+      this.attackButton.touchId = touch.identifier;
       this.touchIds.add(touch.identifier);
     }
     // 如果在虚拟摇杆区域
@@ -222,6 +227,7 @@ export class GameSystem {
       this.joystick.startY = joystickArea.y + joystickArea.height / 2;
       this.joystick.currentX = x;
       this.joystick.currentY = y;
+      this.joystick.touchId = touch.identifier;
       this.touchIds.add(touch.identifier);
     }
     // 游戏结束时的触摸处理
@@ -247,8 +253,8 @@ export class GameSystem {
     const x = touch.clientX - rect.left;
     const y = touch.clientY - rect.top;
     
-    // 更新虚拟摇杆位置
-    if (this.joystick.active) {
+    // 更新虚拟摇杆位置（只更新对应触摸ID的摇杆）
+    if (this.joystick.active && this.joystick.touchId === touch.identifier) {
       this.joystick.currentX = x;
       this.joystick.currentY = y;
     }
@@ -258,9 +264,16 @@ export class GameSystem {
   private handleTouchEnd(touch: Touch): void {
     if (!this.touchIds.has(touch.identifier)) return;
     
-    // 重置虚拟摇杆和攻击按钮状态
-    this.joystick.active = false;
-    this.attackButton.pressed = false;
+    // 只重置对应的控制状态
+    if (this.joystick.touchId === touch.identifier) {
+      this.joystick.active = false;
+      this.joystick.touchId = null;
+    }
+    if (this.attackButton.touchId === touch.identifier) {
+      this.attackButton.pressed = false;
+      this.attackButton.touchId = null;
+    }
+    
     this.touchIds.delete(touch.identifier);
   }
   
