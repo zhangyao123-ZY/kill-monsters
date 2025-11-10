@@ -3,6 +3,7 @@ import { MapGenerator } from './MapGenerator';
 import { Player as PlayerClass } from './Player';
 import { MonsterSpawner } from './Monster';
 import { SpriteLoader } from './SpriteLoader';
+import { skillPool } from './SkillSystem';
 
 export class GameSystem {
   private canvas: HTMLCanvasElement;
@@ -15,6 +16,7 @@ export class GameSystem {
   private keysPressed: Set<string> = new Set();
   private showSkillSelection: boolean = false;
   private isGameOver: boolean = false;
+  private skillOptions: any[] = [];
   
   // 攻击效果系统
   private attackEffects: Array<{
@@ -339,12 +341,12 @@ export class GameSystem {
     this.checkMonsterSpawn();
     this.updateMonsters(deltaTime);
     this.updateSkills();
-    this.applyAuraEffects();
     this.applySlowEffects();
     this.checkCollisions();
     this.updateMap();
     this.checkGameOver();
     this.updateAttackEffects(deltaTime);
+    this.checkSkillPoints();
   }
   
   private updatePlayer(deltaTime: number): void {
@@ -391,9 +393,16 @@ export class GameSystem {
       }
     }
     
-    // 简单的移动实现
-    player.x += dx;
-    player.y += dy;
+    // 获取当前活跃的障碍物
+    const obstacles = this.mapGenerator.getAllActiveObstacles();
+    
+    // 使用Player类的move方法，传入障碍物数组进行碰撞检测
+    if (player.move) {
+      player.move(dx, dy, obstacles);
+    } else {
+      // 后备方案：如果没有move方法，使用类型断言
+      (player as any).move(dx, dy, obstacles);
+    }
   }
   
   private updateCamera(): void {
@@ -425,20 +434,16 @@ export class GameSystem {
   private updateMonsters(deltaTime: number): void {
     const player = this.gameState.player;
     
+    // 获取当前活跃的障碍物
+    const obstacles = this.mapGenerator.getAllActiveObstacles();
+    
     for (const monster of this.gameState.monsters) {
-      // 简化的怪物AI - 直接向玩家移动
-      const dx = player.x - monster.x;
-      const dy = player.y - monster.y;
-      const distanceToPlayer = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distanceToPlayer > 0) {
-        // 使用默认速度代替不存在的speed属性
-        const defaultSpeed = 150;
-        const moveX = (dx / distanceToPlayer) * defaultSpeed * deltaTime;
-        const moveY = (dy / distanceToPlayer) * defaultSpeed * deltaTime;
+      // 使用Monster类的move方法，传入deltaTime和障碍物数组进行碰撞检测
+      if (monster.move) {
+        // 直接设置目标为玩家（使用类型断言）
+        (monster as any).target = player;
         
-        monster.x += moveX;
-        monster.y += moveY;
+        monster.move(deltaTime, obstacles);
       }
     }
   }
@@ -472,12 +477,50 @@ export class GameSystem {
     // 暂时不更新技能
   }
   
-  private applyAuraEffects(): void {
-    // 暂时不应用光环效果
+  // 检查玩家是否有未使用的技能点，如果有则显示技能选择界面
+  private checkSkillPoints(): void {
+    const player = this.gameState.player;
+    // 使用类型断言访问skillPoints属性
+    const playerInstance = player as any;
+    
+    // 如果玩家有技能点且不在技能选择界面
+    if (playerInstance.skillPoints > 0 && !this.showSkillSelection) {
+      this.showSkillSelection = true;
+      // 获取三个随机技能选项
+      this.skillOptions = skillPool.getRandomSkillOptions(3);
+      console.log('显示技能选择界面，可用技能点:', playerInstance.skillPoints);
+    }
   }
   
-  private handleSkillSelection(_event: MouseEvent): void {
-    // 简化的技能选择处理 - 移除所有未使用的变量
+  private handleSkillSelection(event: MouseEvent): void {
+    if (!this.showSkillSelection || this.skillOptions.length === 0) return;
+    
+    const rect = this.canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+    
+    const startY = this.canvas.height / 2;
+    const buttonHeight = 60;
+    const buttonSpacing = 20;
+    
+    // 检查是否点击了某个技能按钮
+    for (let i = 0; i < this.skillOptions.length; i++) {
+      const buttonY = startY + i * (buttonHeight + buttonSpacing);
+      
+      if (mouseY >= buttonY && mouseY <= buttonY + buttonHeight && 
+          mouseX >= this.canvas.width / 2 - 200 && mouseX <= this.canvas.width / 2 + 200) {
+        
+        // 学习选择的技能
+        const selectedSkill = this.skillOptions[i];
+        this.gameState.player.learnSkill(selectedSkill);
+        
+        // 关闭技能选择界面
+        this.showSkillSelection = false;
+        this.skillOptions = [];
+        console.log('选择技能:', selectedSkill.name);
+        break;
+      }
+    }
   }
   
   private applySlowEffects(): void {
@@ -921,6 +964,9 @@ export class GameSystem {
   private renderSkillSelection(): void {
     const ctx = this.ctx;
     const startY = this.canvas.height / 2;
+    const buttonWidth = 400;
+    const buttonHeight = 60;
+    const buttonSpacing = 20;
     
     // 渲染背景遮罩
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
@@ -931,6 +977,31 @@ export class GameSystem {
     ctx.font = '30px Arial';
     ctx.textAlign = 'center';
     ctx.fillText('升级！选择一个技能', this.canvas.width / 2, startY - 50);
+    
+    // 渲染技能选项
+    ctx.textAlign = 'left';
+    for (let i = 0; i < this.skillOptions.length; i++) {
+      const skill = this.skillOptions[i];
+      const buttonY = startY + i * (buttonHeight + buttonSpacing);
+      
+      // 渲染按钮背景
+      ctx.fillStyle = '#444444';
+      ctx.fillRect(this.canvas.width / 2 - buttonWidth / 2, buttonY, buttonWidth, buttonHeight);
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(this.canvas.width / 2 - buttonWidth / 2, buttonY, buttonWidth, buttonHeight);
+      
+      // 渲染技能名称
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '18px Arial';
+      ctx.fillText(skill.name, this.canvas.width / 2 - buttonWidth / 2 + 20, buttonY + 25);
+      
+      // 渲染技能描述
+      ctx.fillStyle = '#CCCCCC';
+      ctx.font = '14px Arial';
+      ctx.fillText(skill.description, this.canvas.width / 2 - buttonWidth / 2 + 20, buttonY + 45);
+    }
+    
     ctx.textAlign = 'left';
   }
   
